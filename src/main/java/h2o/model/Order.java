@@ -16,6 +16,7 @@ public class Order {
     private int distance;
     private int paymentAmount;
     private String orderInfo;
+    private String contactInfo;
 
     public Order(long chatId){
         this.chatId = chatId;

@@ -5,6 +5,7 @@ import h2o.handler.message.CallbackQueryHandler;
 import h2o.handler.message.Searcher;
 import h2o.keyboard.InlineKeyboardBuilder;
 import h2o.keyboard.ReplyKeyboardBuilder;
+import h2o.model.AdminOrderInfo;
 import h2o.model.Order;
 import h2o.model.Partner;
 import h2o.service.OrderService;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
+import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
@@ -37,7 +39,7 @@ public class CleaningPartnerBot extends TelegramLongPollingBot {
     private String welcomeText;
     private ConcurrentHashMap<Long, Order> clientOrders;
     private ConcurrentHashMap<Long, Partner> partners;
-
+    private AdminOrderInfo adminOrderInfo;
 
     private OrderService orderService;
     private PartnersService partnersService;
@@ -64,6 +66,7 @@ public class CleaningPartnerBot extends TelegramLongPollingBot {
         this.registrationChannelId = registrationChannelId;
         this.clientOrders = new ConcurrentHashMap<>();
         this.partners = new ConcurrentHashMap<>();
+        this.adminOrderInfo =null;
         this.welcomeText = "Привет! Я H2o бот помощник! Что будем делать?";
         this.calculator = calculator;
         this.orderService = orderService;
@@ -115,11 +118,19 @@ public class CleaningPartnerBot extends TelegramLongPollingBot {
                 }
                 String command = message.substring(String.valueOf(orderId).length() + 1);
                 if (command.equals("YES")) {
-                    if (orderService.changeStatusApprove(orderId)) {
-                        deleteMessage(update.getCallbackQuery().getMessage().getChat().getId(), update.getCallbackQuery().getMessage().getMessageId());
-                    } else {
-                        sendMessage(chatId, "Не найдено ордера");
+//                    if (orderService.changeStatusApprove(orderId)) {
+//                        deleteMessage(update.getCallbackQuery().getMessage().getChat().getId(), update.getCallbackQuery().getMessage().getMessageId());
+//                    } else {
+//                        sendMessage(chatId, "Не найдено ордера");
+//                    }
+                    adminOrderInfo = new AdminOrderInfo();
+                    adminOrderInfo.setApprove(true);
+                    adminOrderInfo.setOrderId(orderId);
+                    int messageId = sendMessage(chatId, "Уточните итоговую сумму", ReplyKeyboardBuilder.create().row().button("↪Пропустить").endRow().row().button("Отмена").endRow().build());
+                    if(messageId!=0){
+                        adminOrderInfo.getTrashMessages().add(messageId);
                     }
+                    //TODO  ОСТАНОВИЛСЯ ЗДЕСЬ
                     return;
                 }
                 if (command.equals("NO")) {
@@ -315,12 +326,24 @@ public class CleaningPartnerBot extends TelegramLongPollingBot {
                     if (numberBathrooms < 10 && numberBathrooms != 0) {
                         clientOrders.get(chatId).setNumberBathroom(numberBathrooms);
                         clientOrders.get(chatId).setPaymentAmount(calculator.calculateFlat(clientOrders.get(chatId)));
-                        //clientOrders.get(chatId).setOrderInfo(constructOrderMessage(clientOrders.get(chatId)));//TODO Если нужна инфа(скорее всего да)
+                        clientOrders.get(chatId).setOrderInfo(constructOrderMessage(clientOrders.get(chatId)));
                         sendMessage(chatId, constructOrderMessage(clientOrders.get(chatId)),
-                                ReplyKeyboardBuilder.create().row().button("✅Да").button("❌Нет").endRow().build());
+                                ReplyKeyboardBuilder.create().row().button("❌Отмена").endRow().build());
+                        sendMessage(chatId, "Уккажите контактную информацию клиента, чтобы мы могли с ним связаться, для уточнения информации");
                     } else {
-                        sendMessage(chatId, "Извините, но чет дохуя санузлов у вас");
+                        sendMessage(chatId, "Извините, слишком много санузлов");
                     }
+                    return;
+                }
+
+                if (clientOrders.get(chatId).getContactInfo()==null){
+                    if(message.length()>300){
+                        sendMessage(chatId, "Слишком большое сообщение, сократите пожалуйста");
+                        return;
+                    }
+                    clientOrders.get(chatId).setContactInfo(message);
+                    sendMessage(chatId, constructOrderMessage(clientOrders.get(chatId))+"\n<b>Кантакты:</b> "+message,
+                            ReplyKeyboardBuilder.create().row().button("✅Да").button("❌Нет").endRow().build());
                     return;
                 }
 
@@ -332,7 +355,7 @@ public class CleaningPartnerBot extends TelegramLongPollingBot {
                         clientOrders.remove(chatId);
                         return;
                     }
-                    sendMessage(orderChannelId,"<b>CHAT ID</b>: " + chatId + "\n" + constructOrderMessage(clientOrders.get(chatId)),
+                    sendMessage(orderChannelId,"<b>CHAT ID</b>: " + chatId + "\n" + constructOrderMessage(clientOrders.get(chatId))+"\n<b>Кантакты:</b> "+clientOrders.get(chatId).getContactInfo(),
                             InlineKeyboardBuilder.create().row().button("✅Да", orderId + "_YES").button("❌Нет", orderId + "_NO").endRow().build());
                     sendMessage(chatId, "Заявка отправлена!", ReplyKeyboardBuilder.create().row().button("\uD83D\uDCBBПосчитать стоимость").endRow().row().button("\uD83D\uDCB0Узнать баланс").endRow().build());
                     clientOrders.remove(chatId);
@@ -412,7 +435,7 @@ public class CleaningPartnerBot extends TelegramLongPollingBot {
         }
     }
 
-    private void sendMessage(long chatId, String text, ReplyKeyboardMarkup markup) {
+    private int sendMessage(long chatId, String text, ReplyKeyboardMarkup markup) {
         SendMessage sendMessage = new SendMessage();
         sendMessage.setChatId(chatId);
         sendMessage.setText(text);
@@ -420,11 +443,13 @@ public class CleaningPartnerBot extends TelegramLongPollingBot {
         sendMessage.setParseMode("HTML");
         sendMessage.disableWebPagePreview();
         try {
-            execute(sendMessage);
+            Message message = execute(sendMessage);
             //chatHistoryDAO.saveMessage(new MessageDAO(chatId, LocalDateTime.now(), text, "BOT"));
             log.info("send message with Replykeyboard \"{}\" to {}", text, chatId);
+            return message.getMessageId();
         } catch (TelegramApiException e) {
             log.error("Failed to send message with Replykeyboard \"{}\" to {}", text, chatId, e);
+            return 0;
         }
     }
 
@@ -443,6 +468,8 @@ public class CleaningPartnerBot extends TelegramLongPollingBot {
             log.error("Failed to send message with Inlinekeyboard \"{}\" to {}", text, chatId, e);
         }
     }
+
+
 
     private void deleteMessage(long chatId, int messageId) {
         DeleteMessage deleteMessage = new DeleteMessage();

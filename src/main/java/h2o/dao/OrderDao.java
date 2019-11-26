@@ -24,9 +24,11 @@ public class OrderDao {
         parameterSource.addValue("chatId", order.getChatId());
         parameterSource.addValue("amount", order.getPaymentAmount());
         parameterSource.addValue("orderCreationTime", ZonedDateTime.now().withZoneSameInstant(ZoneId.of("+03:00:00")).toLocalDateTime());
+        parameterSource.addValue("orderInfo", order.getOrderInfo());
+        parameterSource.addValue("contactInfo", order.getContactInfo());
 
-        jdbcTemplate.update("INSERT INTO cleaning_order(CHAT_ID, AMOUNT, ORDER_CREATION_TIME)" +
-                        " VALUES (:chatId, :amount, :orderCreationTime)",
+        jdbcTemplate.update("INSERT INTO cleaning_order(CHAT_ID, AMOUNT, ORDER_CREATION_TIME, ORDER_INFO, CONTACT_INFO)" +
+                        " VALUES (:chatId, :amount, :orderCreationTime, :orderInfo, :contactInfo)",
                 parameterSource);
         try{
             int orderId = jdbcTemplate.queryForObject("SELECT ORDER_ID FROM CLEANING_ORDER WHERE ORDER_CREATION_TIME = :orderCreationTime",
