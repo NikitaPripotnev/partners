@@ -35,7 +35,9 @@ allprojects {
         compile "org.telegram:telegrambots-spring-boot-starter:4.1.2"
         compile group: 'org.springframework.boot', name: 'spring-boot-starter-jdbc', version: '2.1.0.RELEASE'
 
-        compile group: 'org.projectlombok', name: 'lombok', version: '1.18.4'
+        compileOnly 'org.projectlombok:lombok:1.18.8'
+        annotationProcessor 'org.projectlombok:lombok:1.18.8'
+        compile group: 'org.projectlombok', name: 'lombok', version: '1.18.10'
 
         compile group: 'org.postgresql', name: 'postgresql', version: '42.2.2'
 

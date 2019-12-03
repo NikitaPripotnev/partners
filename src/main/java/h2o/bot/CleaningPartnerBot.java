@@ -1,4 +1,4 @@
-package h2o;
+package h2o.bot;
 
 import h2o.calculator.Calculator;
 import h2o.handler.message.CallbackQueryHandler;
@@ -152,7 +152,7 @@ public class CleaningPartnerBot extends TelegramLongPollingBot {
                 }
                 String command = message.substring(String.valueOf(chatIdClient).length() + 1);
                 if (command.equals("YES")) {
-                    partnersService.changePosition(chatIdClient, "PARTNER");
+                    partnersService.changeRole(chatIdClient, "PARTNER");
                     deleteMessage(update.getCallbackQuery().getMessage().getChat().getId(), update.getCallbackQuery().getMessage().getMessageId());
                     sendMessage(chatIdClient, "Вы успешно зарегистрированы!", startKeyboard("PARTNER"));
                     return;
@@ -215,7 +215,7 @@ public class CleaningPartnerBot extends TelegramLongPollingBot {
                 }
                 if (message.equals("✅Да")) {
                     partners.get(chatId).setChatId(chatId);
-                    partners.get(chatId).setPosition("CLIENT");
+                    partners.get(chatId).setRole("CLIENT");
                     if (!partnersService.createPartner(partners.get(chatId))) {
                         partners.remove(chatId);
                         sendMessage(chatId, "Не получилось отправить заявку на регистрацию. Обратитесь к оператору", startKeyboard("NONAME"));
@@ -242,11 +242,11 @@ public class CleaningPartnerBot extends TelegramLongPollingBot {
             return;
         }
 
-        if(partner.getPosition().equals("CLIENT")){
+        if(partner.getRole().equals("CLIENT")){
             sendMessageWithRemoveKeyboard(chatId, "Извините! Дождитесь завершения процедуры регистрации");
         }
 
-        if(partner.getPosition().equals("PARTNER")){
+        if(partner.getRole().equals("PARTNER")){
             if (message.equals("/start") || message.equals("❌Отмена")) {
                 clientOrders.remove(chatId);
                 sendMessage(chatId, welcomeText, startKeyboard("PARTNER"));

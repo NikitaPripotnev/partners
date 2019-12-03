@@ -17,5 +17,5 @@ public class Partner {
     private int successfulOrder;
     private int balance;
     private boolean cashoutStatus;
-    private String position;
+    private String role;
 }

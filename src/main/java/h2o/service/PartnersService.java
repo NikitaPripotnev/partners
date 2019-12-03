@@ -31,8 +31,8 @@ public class PartnersService {
         partnersDao.forgetPartner(chatId);
     }
 
-    public void changePosition(long chatId, String position){
-        partnersDao.changePosition(chatId, position);
+    public void changeRole(long chatId, String position){
+        partnersDao.changeRole(chatId, position);
     }
 
 }

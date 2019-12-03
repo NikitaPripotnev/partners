@@ -20,13 +20,12 @@ public class PartnersDao {
         log.debug("Выполняю сохранение клиента в базу '{}'", partner);
         MapSqlParameterSource parameterSource = new MapSqlParameterSource();
         parameterSource.addValue("chatId", partner.getChatId());
-        parameterSource.addValue("positionClient", partner.getPosition());
         parameterSource.addValue("fullName", partner.getFullName());
         parameterSource.addValue("phoneNumber", partner.getPhoneNumber());
         parameterSource.addValue("email", partner.getEmail());
 
-        jdbcTemplate.update("INSERT INTO partners(CHAT_ID, POSITION, FULL_NAME, PHONE_NUMBER, EMAIL)" +
-                        " VALUES (:chatId, :positionClient, :fullName, :phoneNumber, :email)",
+        jdbcTemplate.update("INSERT INTO partners(CHAT_ID, FULL_NAME, PHONE_NUMBER, EMAIL)" +
+                        " VALUES (:chatId, :fullName, :phoneNumber, :email)",
                 parameterSource);
     }
 
@@ -58,9 +57,9 @@ public class PartnersDao {
         }
     }
 
-    public void changePosition(long chatId, String positionClient){
+    public void changeRole(long chatId, String positionClient){
         log.debug("Меняю статус партнера с chatId '{}'", chatId);
-        int updateCount = jdbcTemplate.update("UPDATE PARTNERS SET POSITION = :positionClient WHERE CHAT_ID = :chatId",
+        int updateCount = jdbcTemplate.update("UPDATE PARTNERS SET ROLE = :positionClient WHERE CHAT_ID = :chatId",
                 new MapSqlParameterSource("chatId", chatId).addValue("positionClient", positionClient));
         if (updateCount != 1) {
             log.error("На запрос информации о партнере удалилось количество строк, отличное от 1го. deletedCount '{}', chatId '{}'", updateCount, chatId);
