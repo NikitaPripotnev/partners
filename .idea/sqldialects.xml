@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SqlDialectMappings">
+    <file url="file://$PROJECT_DIR$/postgres/db-init-scripts/db_init_operator_orders.sql" dialect="PostgreSQL" />
+    <file url="file://$PROJECT_DIR$/postgres/db-init-scripts/db_init_partners.sql" dialect="PostgreSQL" />
+    <file url="file://$PROJECT_DIR$/src/main/java/h2o/init_script/db_init_orders.sql" dialect="PostgreSQL" />
+  </component>
+</project>

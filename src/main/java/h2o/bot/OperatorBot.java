@@ -37,11 +37,11 @@ public class OperatorBot extends TelegramLongPollingBot {
     private String username;
     private long adminchaId;
     private long operatorChatId;
-    private long operatorOrderChannelId;
-    private long registrationChannelId;
+    private long firstOrderChannelId;
+    private long secondOrderChannelId;
     private String welcomeText;
     private ConcurrentHashMap<Long, OperatorOrder> clientOperatorOrders;
-    private TmpInfo tmpInfo;
+    private ConcurrentHashMap<Long, TmpInfo> groupTmpInfo;
 
 
     private OperatorOrderService operatorOrderService;
@@ -53,20 +53,20 @@ public class OperatorBot extends TelegramLongPollingBot {
                        @Value("${operator.bot.username}") String username,
                        @Value("${admin.id}") long adminChatId,
                        @Value("${operator.id}") long operatorChatId,
-                       @Value("${operator.order.channel.id}") long operatorOrderChannelId,
+                       @Value("${first.order.channel.id}") long firstOrderChannelId,
+                       @Value("${second.order.channel.id}") long secondOrderChannelId,
                        Searcher searcher,
                        OperatorOrderService operatorOrderService,
-                       OperatorOrderDao operatorOrderDao,
-                       TmpInfo tmpInfo) {
+                       OperatorOrderDao operatorOrderDao) {
         super();
         this.token = token;
         this.username = username;
         this.adminchaId = adminChatId;
         this.operatorChatId = operatorChatId;
-        this.operatorOrderChannelId = operatorOrderChannelId;
-        this.registrationChannelId = registrationChannelId;
+        this.firstOrderChannelId = firstOrderChannelId;
+        this.secondOrderChannelId = secondOrderChannelId;
         this.clientOperatorOrders = new ConcurrentHashMap<>();
-        this.tmpInfo = null;
+        this.groupTmpInfo = new ConcurrentHashMap<>();
         this.welcomeText = "Привет! Я H2o бот помощник! Готов создать заявку?";
         this.operatorOrderDao = operatorOrderDao;
         this.operatorOrderService = operatorOrderService;
@@ -87,7 +87,7 @@ public class OperatorBot extends TelegramLongPollingBot {
 
     @Override
     public void onUpdateReceived(Update update) {
-        long chatId = (update.hasMessage() ? update.getMessage().getChat().getId() : update.getCallbackQuery().getFrom().getId());
+        long chatId = (update.hasMessage() ? update.getMessage().getFrom().getId() : update.getCallbackQuery().getFrom().getId());
         String message;
         if (update.hasMessage()) {
             if (update.getMessage().getText() != null) {
@@ -105,7 +105,8 @@ public class OperatorBot extends TelegramLongPollingBot {
         log.info("Входящее сообщение от {}: {}", chatId, message);
 
         if (update.hasCallbackQuery()) {
-            if (update.getCallbackQuery().getMessage().getChat().getId() == operatorOrderChannelId) {
+            long groupId = update.getCallbackQuery().getMessage().getChat().getId();
+            if (groupId == firstOrderChannelId || groupId == secondOrderChannelId) {
                 int orderId = searcher.searchOrderId(message);
                 if (orderId == 0) {
                     sendMessage(adminchaId, "Ошибка, напиши программисту\nDATE: " + LocalDateTime.now());
@@ -115,84 +116,108 @@ public class OperatorBot extends TelegramLongPollingBot {
                 String command = message.substring(String.valueOf(orderId).length() + 1);
                 if (command.equals("YES")) {
                     OperatorOrder order = operatorOrderDao.fetchOperatorOrder(orderId);
-                    sendMessage(operatorChatId, constructForOperator(order) + "\n\nЗаявка принята!");
+                    sendMessage(operatorChatId, constructForOperator(order) + "\n\n\uD83D\uDD50<b>Заявка принята!</b>");
                     operatorOrderDao.changeStatus(orderId, "APPROVE", true);
-                    editMessage(update.getCallbackQuery().getMessage().getChat().getId(), update.getCallbackQuery().getMessage().getMessageId(), InlineKeyboardBuilder.create().row().button("✅Выполнено", orderId + "_COMPLETE").endRow().row().button("❌Отмена", orderId + "_DENIED").endRow().build());
+                    editMessage(update.getCallbackQuery().getMessage().getChat().getId(), update.getCallbackQuery().getMessage().getMessageId(), InlineKeyboardBuilder.create().row().button("✅Выполнено", orderId + "_COMPLETE").endRow().row().button("❌Отмена", orderId + "_CANCEL").endRow().build());
                     return;
                 }
                 if (command.equals("NO")) {
-                    int messageId = sendMessage(operatorOrderChannelId, "Укажите причину отказа",
+                    int messageId = sendMessage(groupId, "Укажите причину отказа",
                             ReplyKeyboardBuilder.create().row().button("❌Отмена").endRow().build());
-                    tmpInfo = new TmpInfo();
-                    tmpInfo.setOrderId(orderId);
-                    tmpInfo.setMessageId(update.getCallbackQuery().getMessage().getMessageId());
-                    tmpInfo.setDeniedCheck(true);
-                    tmpInfo.addTrashMessage(messageId);
+                    groupTmpInfo.put(groupId, new TmpInfo());
+                    groupTmpInfo.get(groupId).setOrderId(orderId);
+                    groupTmpInfo.get(groupId).setMessageId(update.getCallbackQuery().getMessage().getMessageId());
+                    groupTmpInfo.get(groupId).setDeniedCheck(true);
+                    groupTmpInfo.get(groupId).addTrashMessage(messageId);
                     return;
                 }
                 if(command.equals("COMPLETE")){
-                    int messageId = sendMessage(operatorOrderChannelId, "Вы уверены?",
+                    int messageId = sendMessage(groupId, "Вы уверены?",
                             ReplyKeyboardBuilder.create().row().button("✅Да").button("❌Нет").endRow().build());
-                    tmpInfo = new TmpInfo();
-                    tmpInfo.setOrderId(orderId);
-                    tmpInfo.setCompleteCheck(true);
-                    tmpInfo.setMessageId(update.getCallbackQuery().getMessage().getMessageId());
-                    tmpInfo.addTrashMessage(messageId);
+                    groupTmpInfo.put(groupId, new TmpInfo());
+                    groupTmpInfo.get(groupId).setOrderId(orderId);
+                    groupTmpInfo.get(groupId).setCompleteCheck(true);
+                    groupTmpInfo.get(groupId).setMessageId(update.getCallbackQuery().getMessage().getMessageId());
+                    groupTmpInfo.get(groupId).addTrashMessage(messageId);
                     return;
                 }
                 if(command.equals("DENIED")){
-                    int messageId = sendMessage(operatorOrderChannelId, "Укажите причину отказа",
+                    int messageId = sendMessage(groupId, "Укажите причину отказа",
                             ReplyKeyboardBuilder.create().row().button("❌Отмена").endRow().build());
-                    tmpInfo = new TmpInfo();
-                    tmpInfo.setDeniedCheck(true);
-                    tmpInfo.setOrderId(orderId);
-                    tmpInfo.setMessageId(update.getCallbackQuery().getMessage().getMessageId());
-                    tmpInfo.addTrashMessage(messageId);
+                    groupTmpInfo.put(groupId, new TmpInfo());
+                    groupTmpInfo.get(groupId).setDeniedCheck(true);
+                    groupTmpInfo.get(groupId).setOrderId(orderId);
+                    groupTmpInfo.get(groupId).setMessageId(update.getCallbackQuery().getMessage().getMessageId());
+                    groupTmpInfo.get(groupId).addTrashMessage(messageId);
+                    return;
+                }
+                if(command.equals("CANCEL")){
+                    editMessage(groupId, update.getCallbackQuery().getMessage().getMessageId(),
+                            InlineKeyboardBuilder.create().row().button("✅Да", orderId + "_YES").button("❌Нет", orderId + "_NO").endRow().build());
+                    OperatorOrder order = operatorOrderDao.fetchOperatorOrder(orderId);
+                    sendMessage(operatorChatId, constructForOperator(order) + "\n\n⚠Отмена принятие заявки");
                     return;
                 }
 
+            }else{
+                if(message.equals("NONE_INFO")){
+                    return;
+                }
+
+                String numberGroup = message.substring(0, 1);
+                groupId = numberGroup.equals("1")?firstOrderChannelId:secondOrderChannelId;
+                int orderId = Integer.parseInt(message.substring(2));
+                OperatorOrder operatorOrder = operatorOrderDao.fetchOperatorOrder(orderId);
+                sendMessage(groupId, constructOperatorOrderMessage(operatorOrder),
+                        InlineKeyboardBuilder.create().row().button("✅Да", orderId + "_YES").button("❌Нет", orderId + "_NO").endRow().build());
+                editMessage(chatId, update.getCallbackQuery().getMessage().getMessageId(),
+                        InlineKeyboardBuilder.create().row().button("✅Заявка отправлена", "NONE_INFO").endRow().build());
+                return;
             }
 
         }
 
-        if(update.getMessage().getChat().getId() == operatorOrderChannelId){
-            if(tmpInfo!=null){
-                if(tmpInfo.isDeniedCheck()){
+        if(update.getMessage().getChat().getId() == firstOrderChannelId || update.getMessage().getChat().getId() == secondOrderChannelId){
+            long groupId = update.getMessage().getChat().getId();
+            if(groupTmpInfo.get(groupId)!=null){
+                if(groupTmpInfo.get(groupId).isDeniedCheck()){
                     if(message.equals("❌Отмена")){
-                        deleteTrashMessages(chatId, tmpInfo.getTrashMessages());
-                        deleteMessage(chatId, update.getMessage().getMessageId());
-                        tmpInfo=null;
+                        deleteTrashMessages(groupId, groupTmpInfo.get(groupId).getTrashMessages());
+                        deleteMessage(groupId, update.getMessage().getMessageId());
+                        groupTmpInfo.remove(groupId);
                         return;
                     }
-                    operatorOrderDao.changeString(tmpInfo.getOrderId(), "DENIED_COMMENT", message);
-                    operatorOrderDao.changeStatus(tmpInfo.getOrderId(), "DENIED", true);
-                    operatorOrderDao.changeStatus(tmpInfo.getOrderId(), "APPROVE", true);
-                    sendMessage(operatorChatId, constructForOperator(operatorOrderDao.fetchOperatorOrder(tmpInfo.getOrderId()))+"\n\n❌Заявка отменена!\n"+"<b>Причина:</b> "+message);
-                    deleteTrashMessages(chatId, tmpInfo.getTrashMessages());
-                    deleteMessage(chatId, tmpInfo.getMessageId());
-                    deleteMessage(chatId, update.getMessage().getMessageId());
-                    tmpInfo=null;
+                    operatorOrderDao.changeString(groupTmpInfo.get(groupId).getOrderId(), "DENIED_COMMENT", message);
+                    operatorOrderDao.changeStatus(groupTmpInfo.get(groupId).getOrderId(), "DENIED", true);
+                    operatorOrderDao.changeStatus(groupTmpInfo.get(groupId).getOrderId(), "APPROVE", false);
+                    String numberGroup = groupId==firstOrderChannelId ? "2":"1";
+                    sendMessage(operatorChatId, constructForOperator(operatorOrderDao.fetchOperatorOrder(groupTmpInfo.get(groupId).getOrderId()))+"\n\n❌<b>Заявка отменена!</b>\n"+"<b>Причина:</b> "+message,
+                            InlineKeyboardBuilder.create().row().button("\uD83D\uDCE8Отправить в группу #"+numberGroup, numberGroup+"_"+groupTmpInfo.get(groupId).getOrderId()).endRow().build());
+                    deleteTrashMessages(groupId, groupTmpInfo.get(groupId).getTrashMessages());
+                    deleteMessage(groupId, groupTmpInfo.get(groupId).getMessageId());
+                    deleteMessage(groupId, update.getMessage().getMessageId());
+                    groupTmpInfo.remove(groupId);
                     return;
                 }
-                if(tmpInfo.isCompleteCheck()){
+                if(groupTmpInfo.get(groupId).isCompleteCheck()){
                     if(message.equals("✅Да")){
-                        operatorOrderDao.changeStatus(tmpInfo.getOrderId(), "COMPLETED", true);
-                        sendMessage(operatorChatId, constructForOperator(operatorOrderDao.fetchOperatorOrder(tmpInfo.getOrderId()))+"\n\n✅Заявка выполнена!");
-                        deleteTrashMessages(chatId, tmpInfo.getTrashMessages());
-                        deleteMessage(chatId, tmpInfo.getMessageId());
-                        deleteMessage(chatId, update.getMessage().getMessageId());
-                        tmpInfo=null;
+                        operatorOrderDao.changeStatus(groupTmpInfo.get(groupId).getOrderId(), "COMPLETED", true);
+                        sendMessage(operatorChatId, constructForOperator(operatorOrderDao.fetchOperatorOrder(groupTmpInfo.get(groupId).getOrderId()))+"\n\n✅<b>Заявка выполнена!</b>");
+                        deleteTrashMessages(groupId, groupTmpInfo.get(groupId).getTrashMessages());
+                        deleteMessage(groupId, groupTmpInfo.get(groupId).getMessageId());
+                        deleteMessage(groupId, update.getMessage().getMessageId());
+                        groupTmpInfo.remove(groupId);
                         return;
                     }
                     else{
-                        deleteTrashMessages(chatId, tmpInfo.getTrashMessages());
-                        deleteMessage(chatId, update.getMessage().getMessageId());
-                        tmpInfo=null;
+                        deleteTrashMessages(groupId, groupTmpInfo.get(groupId).getTrashMessages());
+                        deleteMessage(groupId, update.getMessage().getMessageId());
+                        groupTmpInfo.remove(groupId);
                         return;
                     }
                 }
             }else{
-                deleteMessage(chatId, update.getMessage().getMessageId());
+                deleteMessage(groupId, update.getMessage().getMessageId());
             }
             return;
         }
@@ -330,19 +355,19 @@ public class OperatorBot extends TelegramLongPollingBot {
             if (clientOperatorOrders.get(chatId).getOrderAuthor() == null) {
                 clientOperatorOrders.get(chatId).setOrderAuthor(message);
                 sendMessage(chatId, constructOperatorOrderMessage(clientOperatorOrders.get(chatId)),
-                        ReplyKeyboardBuilder.create().row().button("✅Да").button("❌Нет").endRow().build());
+                        ReplyKeyboardBuilder.create().row().button("1").button("2").endRow().row().button("❌Нет").endRow().build());
                 return;
             }
 
-
-            if (message.equals("✅Да")) {
+            if(message.equals("1")||message.equals("2")){
+                long groupId = message.equals("1") ? firstOrderChannelId : secondOrderChannelId;
                 int orderId = operatorOrderService.createOrder(clientOperatorOrders.get(chatId));
                 if (orderId == 0) {
                     sendMessage(chatId, "Не получилось создать заявку, обратитесь к программисту");
                     clientOperatorOrders.remove(chatId);
                     return;
                 }
-                sendMessage(operatorOrderChannelId, constructOperatorOrderMessage(clientOperatorOrders.get(chatId)),
+                sendMessage(groupId, constructOperatorOrderMessage(clientOperatorOrders.get(chatId)),
                         InlineKeyboardBuilder.create().row().button("✅Да", orderId + "_YES").button("❌Нет", orderId + "_NO").endRow().build());
                 sendMessage(chatId, "Заявка отправлена!", ReplyKeyboardBuilder.create().row().button("\uD83D\uDCDDСоздать заявку").endRow().build());
                 clientOperatorOrders.remove(chatId);
@@ -354,8 +379,15 @@ public class OperatorBot extends TelegramLongPollingBot {
                 return;
             }
 
-
         }
+
+        if(message.matches("/.*")){
+            if(message.equals("/deleteOrders")){
+
+            }
+        }
+
+
     }
 
     private String constructOperatorOrderMessage(OperatorOrder order) {

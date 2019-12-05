@@ -57,6 +57,7 @@ public class OperatorOrderDao {
 
     }
 
+
     public boolean changeStatus(int orderId, String name, boolean status){
         log.info("Меняю статус {} на {} у orderId {}", name, status, orderId);
             int updateCount = jdbcTemplate.update("UPDATE OPERATOR_ORDER SET "+name+" = :status WHERE ORDER_ID = :orderId", new MapSqlParameterSource("orderId", orderId).addValue("status", status));
@@ -83,5 +84,7 @@ public class OperatorOrderDao {
         }
         return true;
     }
+
+
 
 }
