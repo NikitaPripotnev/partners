@@ -1,0 +1,50 @@
+version: '3.4'
+services:
+  postgres:
+    image: postgres
+    container_name: postgres
+    restart: always
+    volumes:
+      - ./postgres/db-data:/var/lib/postgresql/data
+      - ./postgres/db-init-scripts:/docker-entrypoint-initdb.d
+    environment:
+      POSTGRES_USER: h2oAdmin
+      POSTGRES_PASSWORD: tv2AZ*6y9QnS6
+      POSTGRES_DB: h2o
+    networks:
+      - h2o
+    expose:
+      - "5500"
+
+  adminer:
+    image: adminer
+    container_name: adminer
+    restart: always
+    environment:
+      - "ADMINER_DEFAULT_SERVER=postgres"
+    ports:
+      - 8080:8080
+    depends_on:
+      - postgres
+    networks:
+      - h2o
+
+  partners:
+    image: partners:latest
+    container_name: partners
+    build:
+      context: partners
+    expose:
+      - "10000"
+    depends_on:
+      - postgres
+    networks:
+      - h2o
+
+
+volumes:
+  postgres:
+
+networks:
+  h2o:
+    driver: bridge

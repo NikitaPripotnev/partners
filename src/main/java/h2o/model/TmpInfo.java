@@ -14,6 +14,8 @@ public class TmpInfo {
     private String cooment;
     private boolean completeCheck;
     private boolean deniedCheck;
+    private boolean editCheck;
+    private OperatorOrder operatorOrder;
     private List<Integer> trashMessages;
 
     public TmpInfo(){

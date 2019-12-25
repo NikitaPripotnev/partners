@@ -4,11 +4,15 @@ import h2o.model.OperatorOrder;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.BeanPropertyRowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
+
+import java.time.LocalDateTime;
+import java.util.List;
 
 @Repository
 @AllArgsConstructor(onConstructor = @__(@Autowired))
@@ -31,9 +35,11 @@ public class OperatorOrderDao {
         parameterSource.addValue("comment", order.getComment());
         parameterSource.addValue("orderCreationTime", order.getOrderCreationTime());
         parameterSource.addValue("orderAuthor", order.getOrderAuthor());
+        parameterSource.addValue("fullOrder", order.isFullOrder());
+        parameterSource.addValue("clientNumber", order.getClientNumber());
 
-        jdbcTemplate.update("INSERT INTO OPERATOR_ORDER(CLEANING_DATE, ADDRESS, PAYMENT_METHOD, TYPE_CLEANING, TYPE_OBJECT, PAYMENT_AMOUNT, CLIENT_NAME, COUNTERPARTY, ORDER_SOURCE, COMMENT, ORDER_CREATION_TIME, ORDER_AUTHOR)" +
-                        " VALUES (:cleaningDate, :address, :paymentMethod, :typeCleaning, :typeObject, :paymentAmount, :clientName, :counterparty, :orderSource, :comment, :orderCreationTime, :orderAuthor)",
+        jdbcTemplate.update("INSERT INTO OPERATOR_ORDER(FULL_ORDER, CLEANING_DATE, ADDRESS, PAYMENT_METHOD, TYPE_CLEANING, TYPE_OBJECT, PAYMENT_AMOUNT, CLIENT_NAME, CLIENT_NUMBER, COUNTERPARTY, ORDER_SOURCE, COMMENT, ORDER_CREATION_TIME, ORDER_AUTHOR)" +
+                        " VALUES (:fullOrder, :cleaningDate, :address, :paymentMethod, :typeCleaning, :typeObject, :paymentAmount, :clientName, :clientNumber, :counterparty, :orderSource, :comment, :orderCreationTime, :orderAuthor)",
                 parameterSource);
         try{
             int orderId = jdbcTemplate.queryForObject("SELECT ORDER_ID FROM OPERATOR_ORDER WHERE ORDER_CREATION_TIME = :orderCreationTime",
@@ -55,6 +61,39 @@ public class OperatorOrderDao {
             return null;
         }
 
+    }
+
+    public List<OperatorOrder> findOrdersBeforeDate(LocalDateTime date){
+        log.info("Получение списка принятых заявок до указанной даты: {}", date);
+        try{
+            List<OperatorOrder> orders = jdbcTemplate.query("SELECT * FROM OPERATOR_ORDER WHERE CLEANING_DATE <= :dateCheck AND APPROVE = TRUE",
+                    new MapSqlParameterSource("dateCheck", date), new BeanPropertyRowMapper<>(OperatorOrder.class));
+            return orders;
+        }
+        catch(EmptyResultDataAccessException e){
+            return null;
+        }
+
+    }
+
+    public void updateDateAndPaymentAmount(int orderId, OperatorOrder order){
+        log.debug("Меняю время и цену в заявке {}, c ценой: {}, датой: {}", orderId, order.getPaymentAmount(), order.getCleaningDate());
+        try{
+            int updateCount = jdbcTemplate.update("UPDATE OPERATOR_ORDER SET CLEANING_DATE = :dateTime, PAYMENT_AMOUNT = :payment, FULL_ORDER = true WHERE ORDER_ID = :orderId",
+                    new MapSqlParameterSource("dateTime", order.getCleaningDate()).addValue("payment", order.getPaymentAmount()).addValue("orderId", orderId));
+        }catch(DataAccessException e){
+            log.error(e.getMessage());
+        }
+    }
+
+    public void updateMessageIdAndGroupNumber(int orderId, int messageId, int groupNumber){
+        log.debug("Устанавливаю messageId {}, в заявке {}", messageId, orderId);
+        try{
+            int updateCount = jdbcTemplate.update("UPDATE OPERATOR_ORDER SET MESSAGE_ID = :messageId, GROUP_NUMBER = :groupNumber WHERE ORDER_ID = :orderId",
+                    new MapSqlParameterSource("messageId", messageId).addValue("orderId", orderId).addValue("groupNumber", groupNumber));
+        }catch(DataAccessException e){
+            log.error(e.getMessage());
+        }
     }
 
 
