@@ -25,4 +25,5 @@ public class OperatorOrder {
     private int messageId;
     private int groupNumber;
     private int chatIdOwner;
+    private boolean completed;
 }

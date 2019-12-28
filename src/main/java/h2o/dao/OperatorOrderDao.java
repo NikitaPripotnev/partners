@@ -110,6 +110,21 @@ public class OperatorOrderDao {
             return true;
     }
 
+    public void deniedOrder(int orderId, String deniedMessage){
+        log.debug("Отменяю заявку и все сопутствующие параметры. orderId:{}, deniedMessage:{}", orderId, deniedMessage);
+        int updateCount = jdbcTemplate.update("UPDATE OPERATOR_ORDER SET DENIED_COMMENT = :deniedMessage, DENIED = true, APPROVE = false, CHAT_ID_OWNER = 0 WHERE ORDER_ID = :orderId",
+                new MapSqlParameterSource("orderId", orderId).addValue("deniedMessage", deniedMessage));
+    }
+
+    public void approveOrder(int orderId, long chatIdOwner){
+        log.debug("Бронирую заявку и все сопутствующие параметры. orderId:{}", orderId);
+        MapSqlParameterSource parameterSource = new MapSqlParameterSource();
+        parameterSource.addValue("orderId", orderId);
+        parameterSource.addValue("chatIdOwner", chatIdOwner);
+        int updateCount = jdbcTemplate.update("UPDATE OPERATOR_ORDER SET DENIED = false, APPROVE = true, CHAT_ID_OWNER = :chatIdOwner WHERE ORDER_ID = :orderId",
+                parameterSource);
+    }
+
 
     public boolean changeString(int orderId, String name, String parametr){
         log.info("Меняю поле {} на {} у orderId {}", name, parametr, orderId);

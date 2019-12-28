@@ -43,6 +43,7 @@ public class OperatorBot extends TelegramLongPollingBot {
     private long secondOrderChannelId;
     private long mainOrderChannelId;
     private String welcomeText;
+    private ReplyKeyboardMarkup startKeyboard;
     private ConcurrentHashMap<Long, OperatorOrder> clientOperatorOrders;
     private ConcurrentHashMap<Long, TmpInfo> groupTmpInfo;
 
@@ -50,6 +51,7 @@ public class OperatorBot extends TelegramLongPollingBot {
     private OperatorOrderService operatorOrderService;
     private OperatorOrderDao operatorOrderDao;
     private Searcher searcher;
+    private AuctionCleaningBot auctionCleaningBot;
 
     @Autowired
     public OperatorBot(@Value("${operator.bot.token}") String token,
@@ -61,7 +63,8 @@ public class OperatorBot extends TelegramLongPollingBot {
                        @Value("${main.order.channel.id}") long mainOrderChannelId,
                        Searcher searcher,
                        OperatorOrderService operatorOrderService,
-                       OperatorOrderDao operatorOrderDao) {
+                       OperatorOrderDao operatorOrderDao,
+                       AuctionCleaningBot auctionCleaningBot) {
         super();
         this.token = token;
         this.username = username;
@@ -73,9 +76,11 @@ public class OperatorBot extends TelegramLongPollingBot {
         this.clientOperatorOrders = new ConcurrentHashMap<>();
         this.groupTmpInfo = new ConcurrentHashMap<>();
         this.welcomeText = "Привет! Я H2o бот помощник! Готов создать заявку?";
+        this.startKeyboard = ReplyKeyboardBuilder.create().row().button("\uD83D\uDCDDСоздать заявку").endRow().row().button("Создать заявку(на рассчет)").endRow().build();
         this.operatorOrderDao = operatorOrderDao;
         this.operatorOrderService = operatorOrderService;
         this.searcher = searcher;
+        this.auctionCleaningBot = auctionCleaningBot;
 
 
     }
@@ -106,7 +111,6 @@ public class OperatorBot extends TelegramLongPollingBot {
             message = update.getCallbackQuery().getData();
         } else {
             log.info("Сообщение некорректно от {}", chatId);
-            // deleteMessage(chatId, update..getMessage().getMessageId());
             return;
         }
         log.info("Входящее сообщение от {}: {}", chatId, message);
@@ -123,17 +127,18 @@ public class OperatorBot extends TelegramLongPollingBot {
                 String command = message.substring(String.valueOf(orderId).length() + 1);
                 if (command.equals("YES")) {
                     OperatorOrder order = operatorOrderDao.fetchOperatorOrder(orderId);
-                    sendMessage(operatorChatId, constructForOperator(order) + "\n\n\uD83D\uDD50<b>Заявка принята!</b>");
-                    operatorOrderDao.changeStatus(orderId, "APPROVE", true);
                     if (order.isFullOrder()) {
                         editMessage(update.getCallbackQuery().getMessage().getChat().getId(), update.getCallbackQuery().getMessage().getMessageId(), constructOperatorOrderMessage(order, true, false),
                                 InlineKeyboardBuilder.create().row().button("✅Выполнено", orderId + "_COMPLETE").endRow().row().button("❌Отмена", orderId + "_CANCEL").endRow().build());
+                        operatorOrderDao.approveOrder(orderId, chatId);
+                        sendMessage(operatorChatId, constructForOperator(order) + "\n\n\uD83D\uDD50<b>Заявка принята в "+order.getGroupNumber()+"группе!</b>");
 
                     } else {
                         editMessage(update.getCallbackQuery().getMessage().getChat().getId(), update.getCallbackQuery().getMessage().getMessageId(), constructOperatorOrderMessage(order, true, false),
                                 InlineKeyboardBuilder.create().row().button("✏Указать точные дату и сумму", orderId + "_EDIT").endRow().row().button("❌Отмена", orderId + "_CANCEL").endRow().build());
-
+                        sendMessage(operatorChatId, constructForOperator(order) + "\n\n\uD83D\uDD50<b>Заявка принята в для уточнения суммы и даты!</b>");
                     }
+
                     return;
                 }
                 if (command.equals("NO")) {
@@ -201,11 +206,11 @@ public class OperatorBot extends TelegramLongPollingBot {
                             InlineKeyboardBuilder.create().row().button("✅Да", orderId + "_YES").button("❌Нет", orderId + "_NO").endRow().build());
                 }
                else{
-                    messageId =  auctionCleaningBot.sendMessage(mainOrderChannelId, constructOperatorOrderMessage(clientOperatorOrders.get(chatId), false, false),
+                    messageId =  auctionCleaningBot.sendMessage(mainOrderChannelId, constructOperatorOrderMessage(operatorOrder, false, false),
                             InlineKeyboardBuilder.create().row().button("✅Забронировать", orderId + "_BOOK").endRow().build());
                 }
                 operatorOrderDao.updateMessageIdAndGroupNumber(orderId, messageId, Integer.parseInt(numberGroup));
-                editMessage(chatId, update.getCallbackQuery().getMessage().getMessageId(), null,
+                editMessage(chatId, update.getCallbackQuery().getMessage().getMessageId(), update.getCallbackQuery().getMessage().getText(),
                         InlineKeyboardBuilder.create().row().button("✅Заявка отправлена", "NONE_INFO").endRow().build());
                 return;
 
@@ -213,9 +218,9 @@ public class OperatorBot extends TelegramLongPollingBot {
 
         }
 
-        if (chatId == firstOrderChannelId || chatId == secondOrderChannelId) {
+        if (update.getMessage().getChat().getId() == firstOrderChannelId || update.getMessage().getChat().getId() == secondOrderChannelId) {
             long groupId = update.getMessage().getChat().getId();
-            int groupNumber = chatId==firstOrderChannelId?1:2;
+            int groupNumber = groupId==firstOrderChannelId?1:2;
 
             if (groupTmpInfo.get(groupId) != null) {
                 groupTmpInfo.get(groupId).addTrashMessage(update.getMessage().getMessageId());
@@ -225,12 +230,9 @@ public class OperatorBot extends TelegramLongPollingBot {
                     return;
                 }
                 if (groupTmpInfo.get(groupId).isDeniedCheck()) {
-                    operatorOrderDao.changeString(groupTmpInfo.get(groupId).getOrderId(), "DENIED_COMMENT", message);
-                    operatorOrderDao.changeStatus(groupTmpInfo.get(groupId).getOrderId(), "DENIED", true);
-                    operatorOrderDao.changeStatus(groupTmpInfo.get(groupId).getOrderId(), "APPROVE", false);
-                    int numberGroup = groupId == firstOrderChannelId ? 2 : 1;
-                    sendMessage(operatorChatId, "❌<b>Заявка отменена в "+groupNumber+" группе!</b>\n\n" + "<b>Причина:</b> "+constructForOperator(operatorOrderDao.fetchOperatorOrder(groupTmpInfo.get(groupId).getOrderId())),
-                            constructKeyboardResend(numberGroup, groupTmpInfo.get(groupId).getOrderId()));
+                    operatorOrderDao.deniedOrder(groupTmpInfo.get(groupId).getOrderId(), message);
+                    sendMessage(operatorChatId, "❌<b>Заявка отменена в "+groupNumber+" группе!</b>\n\n" + "<b>Причина:</b> "+message+"\n"+constructForOperator(operatorOrderDao.fetchOperatorOrder(groupTmpInfo.get(groupId).getOrderId())),
+                            constructKeyboardResend(groupNumber, groupTmpInfo.get(groupId).getOrderId()));
                     deleteTrashMessages(groupId, groupTmpInfo.get(groupId).getTrashMessages());
                     deleteMessage(groupId, groupTmpInfo.get(groupId).getMessageId());
                     groupTmpInfo.remove(groupId);
@@ -251,7 +253,7 @@ public class OperatorBot extends TelegramLongPollingBot {
                     }
                 }
                 if (groupTmpInfo.get(groupId).isEditCheck()) {
-                    if (groupTmpInfo.get(groupId).getOperatorOrder() == null) {
+                    if (groupTmpInfo.get(groupId).getOperatorOrder().getCleaningDate() == null) {
                         LocalDateTime dateTime = parseLocalDateTime(message);
                         if(dateTime!=null){
                             groupTmpInfo.get(groupId).getOperatorOrder().setCleaningDate(dateTime);
@@ -264,7 +266,7 @@ public class OperatorBot extends TelegramLongPollingBot {
                         }
                         return;
                     }
-                    if(groupTmpInfo.get(groupId).getOperatorOrder().getCleaningDate()!=null){
+                    if(groupTmpInfo.get(groupId).getOperatorOrder().getPaymentAmount()==0){
                         int payment;
                         try {
                             payment = Integer.parseInt(message);
@@ -276,11 +278,11 @@ public class OperatorBot extends TelegramLongPollingBot {
                         groupTmpInfo.get(groupId).getOperatorOrder().setPaymentAmount(payment);
                         operatorOrderDao.updateDateAndPaymentAmount(groupTmpInfo.get(groupId).getOrderId(), groupTmpInfo.get(groupId).getOperatorOrder());//TODO менять на полную заявку
                         OperatorOrder order = operatorOrderDao.fetchOperatorOrder(groupTmpInfo.get(groupId).getOrderId());
-                        sendMessage(operatorChatId, "<b>Партнер из "+groupId+" группы внес изменения в заявку</b>\n\n"
+                        sendMessage(operatorChatId, "<b>Партнер из "+groupNumber+" указал точные данные</b>\n\n"
                                 +constructForOperator(order)+"\n<b>Стоимость:</b> " + groupTmpInfo.get(groupId).getOperatorOrder().getPaymentAmount()+"р.");
                         editMessage(groupId, groupTmpInfo.get(groupId).getMessageId(), constructOperatorOrderMessage(order, true, false),
                                 InlineKeyboardBuilder.create().row().button("✅Выполнено", groupTmpInfo.get(groupId).getOrderId() + "_COMPLETE").endRow()
-                                        .row().button("❌Отмена", groupTmpInfo.get(groupId).getOrderId() + "_CANCEL").endRow().build());
+                                        .row().button("❌Отмена", groupTmpInfo.get(groupId).getOrderId() + "_DENIED").endRow().build());
                         deleteTrashMessages(groupId, groupTmpInfo.get(groupId).getTrashMessages());
                         groupTmpInfo.remove(groupId);
                         return;
@@ -294,8 +296,7 @@ public class OperatorBot extends TelegramLongPollingBot {
 
         if (message.equals("/start") || message.equals("❌Отмена")) {
             clientOperatorOrders.remove(chatId);
-            sendMessage(chatId, welcomeText, ReplyKeyboardBuilder.create().row().button("\uD83D\uDCDDСоздать заявку").endRow()
-                    .row().button("Создать заявку(на рассчет)").endRow().build());
+            sendMessage(chatId, welcomeText, startKeyboard);
             return;
         }
 
@@ -303,14 +304,13 @@ public class OperatorBot extends TelegramLongPollingBot {
         if (message.equals("\uD83D\uDCDDСоздать заявку") && clientOperatorOrders.get(chatId) == null) {
             clientOperatorOrders.put(chatId, new OperatorOrder());
             clientOperatorOrders.get(chatId).setFullOrder(true);
-            sendMessage(chatId, "Введите дату и время в формате 28.11.2019 14:48", ReplyKeyboardBuilder.create().row().button("❌Отмена").endRow().build());
+            sendMessage(chatId, "Введите точную дату и время в формате <code>28.11.2019 14:48</code>", ReplyKeyboardBuilder.create().row().button("❌Отмена").endRow().build());
             return;
         }
 
         if (message.equals("Создать заявку(на рассчет)") && clientOperatorOrders.get(chatId) == null) {
             clientOperatorOrders.put(chatId, new OperatorOrder());
-            String text = clientOperatorOrders.get(chatId).isFullOrder() ? "Введите точную дату и время уборки" : "Введите желаемую дату и время уборки";
-            sendMessage(chatId, text + " в формате 28.11.2019 14:48", ReplyKeyboardBuilder.create().row().button("❌Отмена").endRow().build());
+            sendMessage(chatId, "Введите <b>желаемую</b> дату и время уборки в формате <code>28.11.2019 14:48</code>", ReplyKeyboardBuilder.create().row().button("❌Отмена").endRow().build());
             return;
         }
 
@@ -465,7 +465,7 @@ public class OperatorBot extends TelegramLongPollingBot {
                 int messageId = sendMessage(groupId, constructOperatorOrderMessage(clientOperatorOrders.get(chatId), false, false),
                         InlineKeyboardBuilder.create().row().button("✅Да", orderId + "_YES").button("❌Нет", orderId + "_NO").endRow().build());
                 operatorOrderDao.updateMessageIdAndGroupNumber(orderId, messageId, Integer.parseInt(message));
-                sendMessage(chatId, "Заявка отправлена!", ReplyKeyboardBuilder.create().row().button("\uD83D\uDCDDСоздать заявку").endRow().build());
+                sendMessage(chatId, "Заявка отправлена!", startKeyboard);
                 clientOperatorOrders.remove(chatId);
                 return;
             }
@@ -480,30 +480,23 @@ public class OperatorBot extends TelegramLongPollingBot {
                 int messageId = auctionCleaningBot.sendMessage(mainOrderChannelId, constructOperatorOrderMessage(clientOperatorOrders.get(chatId), false, false),
                         InlineKeyboardBuilder.create().row().button("✅Забронировать", orderId + "_BOOK").endRow().build());
                 operatorOrderDao.updateMessageIdAndGroupNumber(orderId, messageId, 3);
-                sendMessage(chatId, "Заявка отправлена!", ReplyKeyboardBuilder.create().row().button("\uD83D\uDCDDСоздать заявку").endRow().build());
+                sendMessage(chatId, "Заявка отправлена!", startKeyboard);
                 clientOperatorOrders.remove(chatId);
                 return;
             }
 
         }
 
-        if (message.matches("/.*")) {
-            if (message.equals("/deleteOrders")) {
-
-            }
-        }
-
-
     }
 
     private String constructOperatorOrderMessage(OperatorOrder order, boolean clientName, boolean orderAuthor) {
         String textDate, textPrice;
         String textNameAndNumber = "", textAuthor = "", textOrderDate = "";
-        if (order.isFullOrder()) {
-            textDate = "<b>Желаемая дата и время:</b> ";
+        if (!order.isFullOrder()) {
+            textDate = "<b>Желаемая дата и время:</b> <code>";
             textPrice = "<b>Желаемая стоимость:</b> ";
         } else {
-            textDate = "<b>Дата уборки и время:</b> ";
+            textDate = "<b>Дата уборки и время:</b> <code>";
             textPrice = "<b>Стоимость:</b> ";
         }
         if (clientName) {
@@ -514,8 +507,8 @@ public class OperatorBot extends TelegramLongPollingBot {
             textAuthor = "<b>Кто оформил заявку:</b> " + order.getOrderAuthor();
             textOrderDate = "<b>Дата оформления заявки:</b> " + formatDate(order.getOrderCreationTime()) + "\n";
         }
-        return (order.isFullOrder()) ? "" : "<b>Заявка с неточной суммой и датой</b>\n" +
-                textDate + formatDate(order.getCleaningDate()) + "\n" +
+        return  (order.isFullOrder() ? "" : "<b>Заявка с обсуждаемой суммой и датой</b>\n") +
+                textDate + formatDate(order.getCleaningDate()) + "</code>\n" +
                 "<b>Адрес:</b> " + order.getAddress() + "\n" +
                 "<b>Контрагент:</b> " + order.getCounterparty() + "\n" +
                 "<b>Вид уборки:</b> " + order.getTypeCleaning() + "\n" +
@@ -541,7 +534,7 @@ public class OperatorBot extends TelegramLongPollingBot {
     }
 
     public String constructForOperator(OperatorOrder order) {
-        return "<b>Контрагент:</b> " + order.getCounterparty() + "\n<b>Имя клиента и телефон:</b> " + order.getClientName() + order.getClientNumber() + "\n<b>Дата и время:</b> " + formatDate(order.getCleaningDate());
+        return "<b>Контрагент:</b> " + order.getCounterparty() + "\n<b>Имя клиента и телефон:</b> " + order.getClientName() +" "+ order.getClientNumber() + "\n<b>Дата и время:</b> " + formatDate(order.getCleaningDate());
     }
 
     private String formatDate(LocalDateTime date) {
@@ -652,7 +645,8 @@ public class OperatorBot extends TelegramLongPollingBot {
         EditMessageText editMessageText = new EditMessageText();
         editMessageText.setChatId(chatId);
         editMessageText.setMessageId(messageId);
-        if (text != null) editMessageText.setText(text);
+        editMessageText.setParseMode("HTML");
+        editMessageText.setText(text);
         if (markup != null) editMessageText.setReplyMarkup(markup);
 
 
